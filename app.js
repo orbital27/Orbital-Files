@@ -1,4 +1,4 @@
-import {mountPages, leavePages, resetDemoPages} from './pages.js';
+import {mountPages, leavePages, resetDemoPages} from './pages.js?v=import-1';
 import {api,configured} from './api.js';
 import {demoData,progress,statuses,priorities,descendants,validateTask,graphLayout} from './model.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

@@ -1,4 +1,5 @@
 import {api} from './api.js';
+import {renderEquation,cleanMathML} from './equations.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $=(s,root=document)=>root.querySelector(s);
 const $$=(s,root=document)=>[...root.querySelectorAll(s)];
@@ -6,7 +7,7 @@ let active=null;
 const samples=new Map(),sampleHistory=new Map(),sampleImages=new Map();
 export function resetDemoPages(){for(const url of sampleImages.values())URL.revokeObjectURL(url);samples.clear();sampleHistory.clear();sampleImages.clear();}
 const clone=x=>structuredClone(x);
-export function leavePages(){if(active?.busy){alert('Wait for the current save or upload to finish.');return false;}if(active?.dirty&&!confirm('Leave without saving? Download your draft first if you want to keep it.'))return false;active=null;return true;}
+export function leavePages(){if(active?.busy){alert('Wait for the current save or upload to finish.');return false;}if(active?.dirty&&!confirm('Leave without saving? Download your draft first if you want to keep it.'))return false;active?.importCleanup?.();active=null;return true;}
 window.addEventListener('beforeunload',e=>{if(active?.dirty||active?.busy){e.preventDefault();e.returnValue='';}});
 const stamp=p=>new Date(p.updated_at).toLocaleString();
 const canManage=(c,p)=>c.manager||p.created_by===c.userId;
@@ -39,8 +40,9 @@ export function mountPages(root,context){
 function shell(c,body){c.root.innerHTML=`<section class="panel pages-panel">${body}<p class="form-error page-error" id="page-error" role="alert"></p></section>`;}
 async function list(c){
  if(active!==c)return;c.dirty=false;
- shell(c,`<div class="panel-header"><div><h2>${c.trash?'Page trash':'Project handbook'}</h2><p>${c.trash?'Pages stay here until restored.':'Write, illustrate, and share what your team knows.'}</p></div><div class="toolbar"><button id="page-trash">${c.trash?'Back to pages':'Trash'}</button>${c.manager?'<button id="page-export">Export backup</button>':''}<button class="primary" id="page-new">New page</button></div></div><div class="page-filters"><label>Search titles<input id="page-search" value="${esc(c.search)}" placeholder="Find a page…"></label><label>Subteam<select id="page-team"><option value="">All subteams</option>${c.teams.map(t=>`<option value="${esc(t.id)}" ${c.team===t.id?'selected':''}>${esc('— '.repeat(t.depth)+t.name)}</option>`).join('')}</select></label><button id="page-find">Search</button></div><div id="page-results" class="page-grid"><p>Loading pages…</p></div><div class="page-pagination"><button id="page-prev" ${c.offset===0?'disabled':''}>Previous</button><span>Page ${Math.floor(c.offset/24)+1}</span><button id="page-next" disabled>Next</button></div>`);
+ shell(c,`<div class="panel-header"><div><h2>${c.trash?'Page trash':'Project handbook'}</h2><p>${c.trash?'Pages stay here until restored.':'Write, illustrate, and share what your team knows.'}</p></div><div class="toolbar"><button id="page-trash">${c.trash?'Back to pages':'Trash'}</button>${c.manager?'<button id="page-export">Export backup</button>':''}<button id="page-import">Import document</button><button class="primary" id="page-new">New page</button></div></div><div class="page-filters"><label>Search titles<input id="page-search" value="${esc(c.search)}" placeholder="Find a page…"></label><label>Subteam<select id="page-team"><option value="">All subteams</option>${c.teams.map(t=>`<option value="${esc(t.id)}" ${c.team===t.id?'selected':''}>${esc('— '.repeat(t.depth)+t.name)}</option>`).join('')}</select></label><button id="page-find">Search</button></div><div id="page-results" class="page-grid"><p>Loading pages…</p></div><div class="page-pagination"><button id="page-prev" ${c.offset===0?'disabled':''}>Previous</button><span>Page ${Math.floor(c.offset/24)+1}</span><button id="page-next" disabled>Next</button></div>`);
  $('#page-new',c.root).onclick=()=>edit(c,{id:crypto.randomUUID(),project_id:c.projectId,created_by:c.userId,version:0,title:'',status:'draft',subteam_id:null,content:[{type:'text',text:''}]});
+ $('#page-import',c.root).onclick=async()=>{try{const {importDocument}=await import('./import-ui.js');if(active===c)importDocument(c,{save,edit,list,renderBlocks,sampleImages});}catch(error){setError(c,error);}};
  $('#page-trash',c.root).onclick=()=>{c.trash=!c.trash;c.offset=0;list(c);};
  $('#page-export',c.root)?.addEventListener('click',()=>backup(c));
  $('#page-find',c.root).onclick=()=>{c.search=$('#page-search',c.root).value.trim();c.team=$('#page-team',c.root).value;c.offset=0;list(c);};
@@ -57,6 +59,8 @@ async function list(c){
  }catch(e){if(target.isConnected){target.innerHTML='<div class="empty">Pages could not be loaded. Your existing tasks are still available.</div>';setError(c,e);}}
 }
 export function renderBlocks(blocks){return blocks.map(b=>{
+ if(b.type==='text'&&b.format==='mathml')return renderEquation(b.text);
+ if(b.type==='text'&&b.format==='transcript')return `<details class="page-transcript"><summary>Extracted text (formatting may differ)</summary><p class="page-text">${esc(b.text)}</p></details>`;
  if(b.type==='heading')return `<h2>${esc(b.text)}</h2>`;
  if(b.type==='list')return `<ul>${(b.text||'').split('\n').filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
  if(b.type==='link'){try{const u=new URL(b.url);if(!['https:','http:'].includes(u.protocol))throw Error();return `<p><a href="${esc(u.href)}" target="_blank" rel="noopener noreferrer">${esc(b.text||u.href)}</a></p>`;}catch{return '<p>Invalid link</p>';}}
@@ -89,7 +93,7 @@ function edit(c,page){
  const dirty=()=>{c.dirty=true;$('#page-save-state',c.root).textContent='Unsaved changes';};
  $('#edit-title',c.root).oninput=e=>{p.title=e.target.value;dirty();};$('#edit-team',c.root).onchange=e=>{p.subteam_id=e.target.value||null;dirty();};
  const blocks=$('#edit-blocks',c.root);
- function draw(){blocks.innerHTML=p.content.map((b,i)=>`<section class="edit-block"><div class="edit-block-head"><strong>${esc(b.type[0].toUpperCase()+b.type.slice(1))}</strong><div><button data-up="${i}" aria-label="Move block ${i+1} up" ${i===0?'disabled':''}>↑</button><button data-down="${i}" aria-label="Move block ${i+1} down" ${i===p.content.length-1?'disabled':''}>↓</button><button data-remove="${i}" aria-label="Remove block ${i+1}">Remove</button></div></div>${b.type==='image'?`<img class="editor-image" data-page-image="${esc(b.path)}" alt="${esc(b.text||'')}"><label>Image description / caption<input data-text="${i}" maxlength="2000" value="${esc(b.text)}"></label>`:`<label>${b.type==='list'?'One item per line':b.type==='link'?'Link label':'Content'}<textarea data-text="${i}" maxlength="20000" rows="${b.type==='heading'?2:4}">${esc(b.text)}</textarea></label>${b.type==='link'?`<label>URL<input data-url="${i}" type="url" value="${esc(b.url||'')}" placeholder="https://…"></label>`:''}`}</section>`).join('');
+ function draw(){blocks.innerHTML=p.content.map((b,i)=>`<section class="edit-block"><div class="edit-block-head"><strong>${esc(b.type[0].toUpperCase()+b.type.slice(1))}</strong><div><button data-up="${i}" aria-label="Move block ${i+1} up" ${i===0?'disabled':''}>↑</button><button data-down="${i}" aria-label="Move block ${i+1} down" ${i===p.content.length-1?'disabled':''}>↓</button><button data-remove="${i}" aria-label="Remove block ${i+1}">Remove</button></div></div>${b.format==='mathml'?`${renderEquation(b.text)}<details><summary>Edit equation markup (MathML)</summary><label>Equation markup<textarea data-text="${i}" maxlength="20000" rows="4">${esc(b.text)}</textarea></label></details>`:b.type==='image'?`<img class="editor-image" data-page-image="${esc(b.path)}" alt="${esc(b.text||'')}"><label>Image description / caption<input data-text="${i}" maxlength="2000" value="${esc(b.text)}"></label>`:`<label>${b.type==='list'?'One item per line':b.type==='link'?'Link label':'Content'}<textarea data-text="${i}" maxlength="20000" rows="${b.type==='heading'?2:4}">${esc(b.text)}</textarea></label>${b.type==='link'?`<label>URL<input data-url="${i}" type="url" value="${esc(b.url||'')}" placeholder="https://…"></label>`:''}`}</section>`).join('');
   $$('[data-text]',blocks).forEach(e=>e.oninput=()=>{p.content[+e.dataset.text].text=e.value;dirty();});$$('[data-url]',blocks).forEach(e=>e.oninput=()=>{p.content[+e.dataset.url].url=e.value;dirty();});
   $$('[data-remove]',blocks).forEach(e=>e.onclick=()=>{if(confirm('Remove this block from the draft?')){p.content.splice(+e.dataset.remove,1);dirty();draw();}});
   for(const [key,delta] of [['up',-1],['down',1]])$$(`[data-${key}]`,blocks).forEach(e=>e.onclick=()=>{const i=+e.dataset[key];[p.content[i],p.content[i+delta]]=[p.content[i+delta],p.content[i]];dirty();draw();});
@@ -103,6 +107,7 @@ function edit(c,page){
  const lock=flag=>{c.busy=flag;$$('button,input,textarea,select',c.root).forEach(e=>{if(flag){e.dataset.wasDisabled=String(e.disabled);e.disabled=true;}else if(e.dataset.wasDisabled!==undefined){e.disabled=e.dataset.wasDisabled==='true';delete e.dataset.wasDisabled;}});};
  async function commit(status){if(c.busy)return;try{
    if(!p.title.trim())throw Error('Give this page a title.');
+   for(const b of p.content)if(b.format==='mathml')cleanMathML(b.text);
    for(const b of p.content)if(b.type==='link'){const url=new URL(b.url);if(!['https:','http:'].includes(url.protocol))throw Error('Links must use http:// or https://.');}
    lock(true);const saved=await save(c,'save',{...p,title:p.title.trim(),status,expected_version:p.version});c.dirty=false;c.toast(status==='draft'?'Draft saved.':'Page published.');
    if(status==='draft')edit(c,saved);else await view(c,saved);
