@@ -1,4 +1,4 @@
-import {api} from './api.js';
+import {api} from './api.js?v=projects-1';
 import {renderEquation,cleanMathML} from './equations.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $=(s,root=document)=>root.querySelector(s);
@@ -42,7 +42,7 @@ async function list(c){
  if(active!==c)return;c.dirty=false;
  shell(c,`<div class="panel-header"><div><h2>${c.trash?'Page trash':'Project handbook'}</h2><p>${c.trash?'Pages stay here until restored.':'Write, illustrate, and share what your team knows.'}</p></div><div class="toolbar"><button id="page-trash">${c.trash?'Back to pages':'Trash'}</button>${c.manager?'<button id="page-export">Export backup</button>':''}<button id="page-import">Import document</button><button class="primary" id="page-new">New page</button></div></div><div class="page-filters"><label>Search titles<input id="page-search" value="${esc(c.search)}" placeholder="Find a page…"></label><label>Subteam<select id="page-team"><option value="">All subteams</option>${c.teams.map(t=>`<option value="${esc(t.id)}" ${c.team===t.id?'selected':''}>${esc('— '.repeat(t.depth)+t.name)}</option>`).join('')}</select></label><button id="page-find">Search</button></div><div id="page-results" class="page-grid"><p>Loading pages…</p></div><div class="page-pagination"><button id="page-prev" ${c.offset===0?'disabled':''}>Previous</button><span>Page ${Math.floor(c.offset/24)+1}</span><button id="page-next" disabled>Next</button></div>`);
  $('#page-new',c.root).onclick=()=>edit(c,{id:crypto.randomUUID(),project_id:c.projectId,created_by:c.userId,version:0,title:'',status:'draft',subteam_id:null,content:[{type:'text',text:''}]});
- $('#page-import',c.root).onclick=async()=>{try{const {importDocument}=await import('./import-ui.js');if(active===c)importDocument(c,{save,edit,list,renderBlocks,sampleImages});}catch(error){setError(c,error);}};
+ $('#page-import',c.root).onclick=async()=>{try{const {importDocument}=await import('./import-ui.js?v=projects-1');if(active===c)importDocument(c,{save,edit,list,renderBlocks,sampleImages});}catch(error){setError(c,error);}};
  $('#page-trash',c.root).onclick=()=>{c.trash=!c.trash;c.offset=0;list(c);};
  $('#page-export',c.root)?.addEventListener('click',()=>backup(c));
  $('#page-find',c.root).onclick=()=>{c.search=$('#page-search',c.root).value.trim();c.team=$('#page-team',c.root).value;c.offset=0;list(c);};
